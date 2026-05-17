@@ -86,7 +86,8 @@ Byte    Field               Description
 16      Unknown2            Unknown/reserved
 17      Timer Start         Start timer setting
 18      Timer Stop          Stop timer setting
-19      Unknown3            Unknown/reserved
+19      Compressor Run Flag Provisional compressor-running flag. `0x01` observed while
+                            running and `0x00` while idling in heat-mode captures.
 20      Mode Flags          Special mode flags
 21      Operation Flags     Status flags (water pump, water lock, etc.)
 22      Error Flags Low     Error code/flags (low byte)
@@ -103,6 +104,16 @@ Byte    Field               Description
 30      CRC                 Checksum
 31      Prologue            Always 0x55
 ```
+
+### Byte 19 observation
+
+- **Byte 19 (`Compressor Run Flag`)** — provisional compressor-running flag.
+  In paired heat-mode captures from one system, C0 byte 19 was `0x01` while the
+  compressor was running and `0x00` while the unit was idling, while the C4
+  `compressor_flags` field stayed at `0x8C` (compressor active, outdoor fan
+  running, no protections) and C0 bytes 28-29 (`0xE0/0x01`) stayed
+  unchanged. This needs validation on more hardware before being treated as
+  universal.
 
 ### Byte 27-29 observations
 
@@ -137,6 +148,10 @@ yields the following partial picture:
   not an input. Best remaining hypotheses: an internal sensor reading
   (compressor discharge? evaporator pressure?), a defrost / protection
   countdown, or some non-user-facing controller state.
+  A separate pair of heat-mode captures also held bytes 28-29 steady at
+  `0xE0/0x01` while byte 19 toggled between compressor running (`0x01`) and
+  idle (`0x00`), so byte 28 is also **not coupled to compressor start/stop**
+  on the observed timescale.
 - **Byte 29 (`Unknown6`)** — hardware-dependent steady state: `0x01` across
   all 771 PNW frames; alternates `0x00`/`0x01` with occasional `0x02` on the
   C&H unit. Meaning unclear.
