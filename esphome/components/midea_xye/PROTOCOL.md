@@ -115,6 +115,19 @@ Byte    Field               Description
   unchanged. This needs validation on more hardware before being treated as
   universal.
 
+### C4 byte 17 (`Target Fan Speed`)
+
+C4 (QUERY_EXTENDED) byte 17 — previously labelled `indoor_unit_address` — is the
+target (commanded) fan speed. It uses the same encoding as the C0 `fan_mode` byte
+(see [Fan Modes](#fan-modes)): `HIGH 0x01`, `MEDIUM 0x02`, `LOW 0x04`, `AUTO 0x80`.
+Note that, as with C0 `fan_mode`, low fan has been observed as both `0x03` and `0x04`
+on different units — do not assume `0x04` is universal. All four speeds were confirmed
+by selecting each in turn and observing byte 17 directly (issue #120).
+
+This is distinct from the C0 `fan_mode` byte, which reports the *actual* speed the fan
+is currently running and reads `0x00` while the fan is idle — so byte 17 is the field
+to use when reflecting the user's fan selection.
+
 ### Byte 27-29 observations
 
 These three bytes are not yet decoded. Cross-referencing independent captures
