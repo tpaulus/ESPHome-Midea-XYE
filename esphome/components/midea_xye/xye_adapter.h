@@ -9,6 +9,23 @@ namespace esphome {
 namespace midea {
 namespace xye {
 
+/// @brief Monotonic fan-speed level produced by the adapter for the `fan_speed` sensor.
+///
+/// This is an adapter output type, not an XYE protocol value — the raw protocol
+/// nibble (FanMode) is not ordered by speed (FAN_HIGH is 0x01 while FAN_LOW is
+/// 0x03/0x04). XYEAdapter::get_fan_speed_level remaps it onto this ordinal scale
+/// so the published sensor value sorts and graphs correctly. It deliberately
+/// lives here, beside the adapter, rather than in the protocol header xye.h.
+///
+/// Enumerators carry a SPEED_ prefix because the Arduino framework defines LOW
+/// and HIGH as preprocessor macros, which would otherwise mangle bare names.
+enum class FanSpeedLevel : uint8_t {
+  SPEED_OFF = 0,     ///< Fan not running
+  SPEED_LOW = 1,     ///< Low speed
+  SPEED_MEDIUM = 2,  ///< Medium speed
+  SPEED_HIGH = 3     ///< High speed
+};
+
 /// @brief Static adapter class that bridges XYE protocol values and ESPHome climate entity types.
 ///        All methods are static and noexcept, performing pure value conversions with no side effects.
 struct XYEAdapter {
@@ -18,6 +35,10 @@ struct XYEAdapter {
   /// Returns the ESPHome ClimateFanMode for the given XYE FanMode byte.
   static climate::ClimateFanMode get_climate_fan_mode(FanMode fan_mode) noexcept;
 
+  /// Returns the monotonic FanSpeedLevel ordinal for the given XYE FanMode byte.
+  /// The raw protocol nibble is not ordered by speed; this remaps it for the fan_speed sensor.
+  static FanSpeedLevel get_fan_speed_level(FanMode fan_mode) noexcept;
+
   /// Returns the decoded Celsius temperature from an encoded XYE temperature byte.
   /// Used for T1/T2/T3/outdoor temperature readings and the C4 setpoint when not in Fahrenheit.
   static float get_temperature(uint8_t raw) noexcept;
@@ -26,10 +47,19 @@ struct XYEAdapter {
   /// masking out the SET_TEMP_STATUS_FLAG (bit 6) that the unit may set in certain states.
   static float get_target_temperature(uint8_t raw) noexcept;
 
-  /// Returns the ClimateAction derived from the current mode, fan, and operation state.
+  /// Returns the ClimateAction derived from the current mode, fan, operation state,
+  /// compressor status, and defrost state.
+  /// @param compressor_active true when the compressor is actively running (C0 byte [19]).
+  ///        HEATING/COOLING is reported only when this is set; otherwise the fan is just
+  ///        circulating air (e.g. a compressor-protection delay between cycles) and FAN is
+  ///        reported instead.
+  /// @param defrost_active true when the unit is running a defrost cycle. A heating action
+  ///        is downgraded to IDLE because the reversed refrigeration cycle is melting
+  ///        outdoor-coil ice, not warming the room.
   /// @note Intended for use when mode != CLIMATE_MODE_OFF.
   static climate::ClimateAction get_climate_action(climate::ClimateMode mode, FanMode fan_mode,
-                                                   OperationMode op_mode) noexcept;
+                                                   OperationMode op_mode, bool compressor_active,
+                                                   bool defrost_active) noexcept;
 
   /// Returns the XYE OperationMode for the given ESPHome ClimateMode.
   static OperationMode get_operation_mode(climate::ClimateMode mode) noexcept;

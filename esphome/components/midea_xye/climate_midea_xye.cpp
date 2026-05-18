@@ -276,8 +276,16 @@ void ClimateMideaXYE::ParseResponse() {
                         XYEAdapter::get_target_temperature(qr.target_temperature.value), need_publish);
 #endif
 
+        // Compressor/defrost-aware action is opt-in (compressor_aware_action) while the
+        // C0 byte-19 compressor flag is still provisional. When disabled, compressor_active=true
+        // and defrost_active=false reproduce the legacy "fan running implies heating/cooling".
+        const bool compressor_active = !this->compressor_aware_action_ ||
+                                       qr.compressor_running_flag == CompressorRunningFlag::ACTIVE;
+        const bool defrost_active = this->compressor_aware_action_ &&
+                                    XYEAdapter::is_defrost_active(qr.protect_flags.value());
         update_property(this->action,
-                        XYEAdapter::get_climate_action(mode, qr.fan_mode, qr.operation_mode),
+                        XYEAdapter::get_climate_action(mode, qr.fan_mode, qr.operation_mode,
+                                                       compressor_active, defrost_active),
                         need_publish);
 
         if ((this->swing_mode != ClimateSwingMode::CLIMATE_SWING_OFF) !=
@@ -306,8 +314,11 @@ void ClimateMideaXYE::ParseResponse() {
       set_sensor(this->timer_stop_sensor_, CalculateGetTime(qr.timer_stop));
       set_sensor(this->error_flags_sensor_, static_cast<float>(qr.error_flags.value()));
       set_sensor(this->protect_flags_sensor_, static_cast<float>(qr.protect_flags.value()));
+      set_sensor(this->fan_speed_sensor_, static_cast<float>(XYEAdapter::get_fan_speed_level(qr.fan_mode)));
 #ifdef USE_BINARY_SENSOR
       set_binary_sensor(this->defrost_sensor_, XYEAdapter::is_defrost_active(qr.protect_flags.value()));
+      set_binary_sensor(this->compressor_active_sensor_,
+                        qr.compressor_running_flag == CompressorRunningFlag::ACTIVE);
 #endif
       break;
     }
