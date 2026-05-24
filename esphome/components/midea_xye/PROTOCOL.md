@@ -12,6 +12,7 @@ This documentation is based on:
 - Implementation by Bunicutz: https://github.com/Bunicutz/ESP32_Midea_RS485
 - ESPHome Midea component: https://github.com/esphome/esphome/tree/dev/esphome/components/midea
 - HA Community thread reverse-engineering by mdrobnak, rymo, and others: https://community.home-assistant.io/t/midea-a-c-via-local-xye/857679 ([archived PDF](https://github.com/user-attachments/files/26555742/Midea.A_C.via.local.XYE.-.ESPHome.-.Home.Assistant.Community.pdf))
+- S1/S2 bus reverse-engineering by MidATRIX: https://github.com/MidATRIX/midea-s1s2-rs485-monitor — different bus (IDU↔ODU), same RS-485 medium, useful field-level cross-reference. See [Related Protocols](#related-protocols--s1s2-bus-iduodu).
 
 ## Physical Layer
 
@@ -170,6 +171,58 @@ yields the following partial picture:
   C&H unit. Meaning unclear.
 
 Any of these interpretations is provisional until more hardware is captured.
+
+#### MidATRIX cross-reference (May 2026)
+
+MidATRIX (author of [midea-s1s2-rs485-monitor](https://github.com/MidATRIX/midea-s1s2-rs485-monitor))
+established an XYE tap on the same KJR-120W/MBF wired controller and posted two
+candidate interpretations of C0 bytes 28-29 — they don't fully agree with each
+other and neither has been confirmed on XYE:
+
+1. **EEV position (16-bit LE)** — ["Reverse engineering Senville/Midea
+   SComms"](https://community.home-assistant.io/t/reverse-engineering-senville-midea-scomms/992233/18):
+   `c0_b28 = EEV Low`, `c0_b29 = EEV High`. Combined as `(b29 << 8) | b28`,
+   little-endian. This is consistent with the IDU EEV step-count range and would
+   match S1/S2's separate ODU `EXV_Position_Steps` (frame `0001_53` bytes 11+12)
+   reported by the same project.
+
+2. **Oil Return Cycle counter (single byte 28)** — ["Midea A/C via local
+   XYE"](https://community.home-assistant.io/t/midea-a-c-via-local-xye/857679/239),
+   May 14: byte 28 ("0x1C / field 29" in MidATRIX's numbering) counts up to ~30
+   min, then transitions into an oil-return percentage; when the percentage
+   exceeds 90% (bits 0-6) the unit equalizes for the remaining ~2 min then
+   resets. Bit 7 (`0x80`) is described as an "Active Oil Returning To Sump
+   Cycle" flag. Observed in cool mode; defrost behaviour unknown.
+
+**Our PNW capture fits interpretation 1 (EEV) more cleanly than interpretation
+2 (oil return).** As a 16-bit LE EEV step count, the seven values become:
+
+  ```
+  (0x01 << 8) | 0xE0 = 0x01E0 = 480
+  (0x01 << 8) | 0xD0 = 0x01D0 = 464
+  (0x01 << 8) | 0xC2 = 0x01C2 = 450
+  (0x01 << 8) | 0xBE = 0x01BE = 446
+  (0x01 << 8) | 0xBA = 0x01BA = 442
+  (0x01 << 8) | 0xAE = 0x01AE = 430
+  (0x01 << 8) | 0xB0 = 0x01B0 = 432
+  ```
+
+  Tight 430-480 step range on an idle unit — plausible for an IDU EEV holding
+  position with minor superheat-driven trim. By contrast, the oil-return
+  interpretation requires bit 7 to be set on **all** seven observed values
+  (it is — every value `≥ 0x80`), which would mean the unit was in "active
+  oil returning to sump" for the entire 22-minute capture rather than counting
+  up over 30 min and only triggering for ~2 min.
+
+**Both are unconfirmed on XYE.** Resolving the conflict requires either:
+
+- A simultaneous XYE + S1/S2 capture on the same unit (MidATRIX has both taps —
+  ideal cross-validation source), or
+- Logging XYE byte 28/29 over a full known compressor cycle on this project's
+  hardware to see whether the values track a 0-500 EEV-step pattern or a
+  30-min count-up-then-oil-return pattern.
+
+Until then, treat these as **research hypotheses**, not decoded fields.
 
 ## Commands
 
@@ -330,7 +383,20 @@ Protection flags are reported as a 16-bit value across bytes 24-25:
 - Byte 24: Protection flags low byte
 - Byte 25: Protection flags high byte
 
-The exact meaning of individual error codes varies by unit model and requires the service manual.
+Known protection-flag bits:
+
+```
+Bit / Mask      Name                Description
+----------      ----                -----------
+0x0002          DEFROST             Unit is currently running a defrost cycle
+                                    (refrigeration cycle reversed; fan may keep
+                                    running while no useful heating is delivered).
+                                    Decoded as DEFROST_PROTECT_FLAG and surfaced via
+                                    the optional `defrost:` binary sensor.
+```
+
+The exact meaning of the remaining bits varies by unit model and requires the service
+manual.
 
 ## CCM Communication Error Flags
 
@@ -482,6 +548,196 @@ The master (CCM/thermostat) uses a polling model:
 - Not all fields in extended query response are fully understood
 - Field interpretation may vary by model
 
+## Related Protocols — S1/S2 bus (IDU↔ODU)
+
+A separate Midea RS-485 bus, the **S1/S2 bus**, runs between the indoor unit and the
+outdoor inverter unit. It is a *different* bus from XYE/CCM (which sits between the IDU
+and the wired thermostat / centralized controller), but it is part of the same
+Midea protocol family and is **physically present on most Midea-based systems
+simultaneously with the XYE bus**.
+
+The [MidATRIX/midea-s1s2-rs485-monitor](https://github.com/MidATRIX/midea-s1s2-rs485-monitor)
+project has reverse-engineered a substantial portion of S1/S2 and is the most useful
+external cross-reference we have for narrowing down still-unknown XYE bytes (byte 15
+`Current`, byte 16 `Unknown2`, bytes 27-29 `Unknown4/5/6` — see [Receive
+Messages](#receive-messages-server--client) and [Byte 27-29
+observations](#byte-27-29-observations)).
+
+> ⚠️ **Bus voltage safety.** MidATRIX explicitly warns that S1/S2 bus voltage varies
+> by system topology — their reference unit (separate mains supplies for IDU and ODU)
+> reads 5 V, but mini-splits with a shared supply can present mains-level potential on
+> the same terminals. **Always measure before tapping.**
+
+### Framing differences (not directly comparable)
+
+The two protocols share only the wire-level parameters; the frame layout, CRC, and
+addressing are independent. Do **not** apply S1/S2 decoders to XYE bytes (or vice
+versa) without verifying byte offsets first.
+
+| Aspect             | XYE/CCM (this project)                | S1/S2 (MidATRIX)                                  |
+| ------------------ | ------------------------------------- | ------------------------------------------------- |
+| Bus role           | IDU ↔ CCM / wired thermostat          | IDU ↔ ODU (outdoor inverter)                      |
+| UART               | 4800 8N1 half-duplex                  | 4800 8N1 half-duplex **(same)**                   |
+| Preamble           | `0xAA`                                | `0xA0`                                            |
+| Prologue           | `0x55`                                | (none — last 2 bytes are CRC)                     |
+| Checksum           | 1-byte: `0xFF − sum(bytes 0…N-1)`     | CRC-16/MODBUS, little-endian                      |
+| Frame length       | Fixed (16 TX / 32 RX)                 | Variable; length byte at offset 4                 |
+| Address            | 1-byte device ID `0x00..0x3F`         | 2-byte device address (`0x0001`=ODU, `0x0100`=IDU)|
+| Polling            | CCM master polls 64 IDs (130 ms slot) | ODU master, 24-frame cycle (~3.6 s)               |
+
+### Field-level evidence that *is* useful
+
+Even though framing differs, Midea reuses sensor concepts and similar — but **not
+identical** — scaling formulas across both buses. This is where MidATRIX adds value:
+
+| Concept                  | XYE (this protocol)                                  | S1/S2 equivalent (MidATRIX)                              | What we can infer                                                                                                                                                              |
+| ------------------------ | ---------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operation mode enum      | bit-encoded: `0x80` AUTO, `0x88` COOL, `0x84` HEAT…  | raw enum: `0x00=Off, 0x01=Cool, 0x02=Heat, 0x03=Fan, 0x04=Dry, 0x07=Defrost` | XYE has no `DEFROST` value in `operation_mode` itself — instead defrost is exposed as bit `0x0002` of the 16-bit `protect_flags` field (bytes 24–25, see [Error and Protection Flags](#error-and-protection-flags)). This component already decodes it as `DEFROST_PROTECT_FLAG` and surfaces it via the optional `defrost:` binary sensor. S1/S2 lifts it to a top-level mode value; XYE keeps it as a protection-flag bit. |
+| Fan enum                 | `0x01=H, 0x02=M, 0x03|0x04=L, 0x80=AUTO`             | `0x01=H, 0x02=M, 0x03=L, 0x06=Boost, 0x0F=Auto`          | Encoding diverges across buses — `0x06=Boost` and `0x0F=Auto` on S1/S2 do **not** apply to XYE. Use only the XYE encoding for XYE bytes.                                       |
+| Temperature              | `(raw − 0x28) / 2` (offset 40)                       | `(raw − 61) / 2` or `(raw − 62) / 2` (offsets 61/62)     | Same `÷ 2` quantisation (0.5 °C steps); different bias. Useful pattern when investigating other XYE bytes that might encode temperature — try the `(raw − k) / 2` family first. |
+| Compressor current       | byte 15 `Current` (often `0xFF`)                     | frame `0001_20` byte 12: `Compressor_Actual_Amps = raw / 3.2` | Current is an **ODU-side** quantity. The XYE `0xFF` is almost certainly an unimplemented-on-IDU sentinel, not a bug — IDU doesn't measure compressor current locally; the ODU does, and only S1/S2 sees it. |
+| Demand / target frequency| not present                                          | IDU frame byte 7 `IDU_Demand_Hz` (0–96 Hz)                | XYE → CCM exchange doesn't carry demand-Hz; that handshake lives entirely on S1/S2. Don't look for it in XYE bytes.                                                            |
+| EEV/EXV                  | byte 17 `IDU_EEV_Zone_Cmd` (zone command); **candidate**: bytes 28+29 may be IDU EEV step count (LE 16-bit) — see [Byte 27-29 observations](#byte-27-29-observations) | frame `0001_53` bytes 11+12 `EXV_Position_Steps` (LE 16-bit, 75–4200 steps) | XYE byte 17 is a **zone-level** command (Low/Med/High). MidATRIX has separately suggested XYE bytes 28+29 carry the **IDU EEV** position as a 16-bit LE step count; our PNW idle capture decodes to 430-480 steps under that hypothesis, which is physically plausible for an idle indoor EEV. Not yet confirmed. The ODU EXV position remains S1/S2-only. |
+| Outdoor temp             | byte 14 `T3 Temperature` (one byte)                  | frame `0001_20` byte 10 `(raw·0.36775 − 17.2)` + byte 15 fractional `raw/696.125` | S1/S2 uses a 2-byte composite for ¼-°C precision; XYE's single byte is coarser. If a future model exposes a second outdoor-temp byte over XYE, the S1/S2 composite pattern is a candidate.|
+
+### Candidate interpretations for XYE bytes 28 & 29
+
+[Byte 27-29 observations](#byte-27-29-observations) show byte 28 drifting slowly while idle
+(`0xE0 → 0xD0 → 0xC2 → 0xBE → 0xBA → 0xAE → 0xB0` over ~22 min on one PNW unit), byte 29
+steady at `0x01`, and both staying steady through user mode/temperature/fan changes.
+
+The current best candidates come from MidATRIX's May 2026 community-thread posts (see
+[MidATRIX cross-reference](#midatrix-cross-reference-may-2026) in Byte 27-29 observations
+for the full discussion and the side-by-side decode against our PNW capture):
+
+- ✅ **IDU EEV position (16-bit LE across bytes 28+29)** — **current leading hypothesis.**
+  Our PNW values decode to 430–480 steps under this interpretation, which is tight,
+  monotonic-ish, and physically plausible for an idle IDU EEV. Cited in MidATRIX's
+  Senville/Midea SComms thread (post #18).
+- ⚠️ **Oil Return Cycle counter (single byte 28)** — alternative interpretation
+  posted by MidATRIX in the XYE thread (post #239 area). Encoding: bits 0-6 =
+  timer/percentage; bit 7 = "Active Oil Returning To Sump Cycle" flag. Cycle:
+  ~30 min count-up → percentage; > 90% → ~2 min equalize → reset. Doesn't fit our
+  PNW capture cleanly (bit 7 set on every value would imply the unit was in active
+  oil return for the full 22 min) but may apply on other firmware/modes.
+
+Earlier hypotheses (AC input voltage, heatsink/discharge temperature, runtime
+counter) are superseded by the MidATRIX interpretations above and have been
+retired. They didn't account for byte 29 staying steady at `0x01` — under the EEV
+hypothesis that's simply the high byte of an EEV step count below 512.
+
+**Both remaining hypotheses are unconfirmed on XYE.** To disambiguate, capture XYE
+bytes 28-29 simultaneously with either (a) MidATRIX's S1/S2 frame `0001_53`
+bytes 11+12 (EXV step count) on the same unit, or (b) a known full compressor +
+oil-return cycle over ≥45 min. Open an issue with the capture if you run either.
+
+### Where to look in the MidATRIX repo
+
+If you want to dig further:
+
+- [`src/decode/sensors.py`](https://github.com/MidATRIX/midea-s1s2-rs485-monitor/blob/main/src/decode/sensors.py) — concrete decoding for every frame ID, with exact byte offsets and scaling formulas.
+- [`src/protocol/validator.py`](https://github.com/MidATRIX/midea-s1s2-rs485-monitor/blob/main/src/protocol/validator.py) — CRC-16/MODBUS implementation (relevant if you ever capture mixed-bus traffic).
+- [README "Sensor Reference" section](https://github.com/MidATRIX/midea-s1s2-rs485-monitor#sensor-reference) — confidence-graded field table, including ⚠️ "probable" and ❓ "unknown" entries that themselves are still open research questions.
+- [HA Community thread on Senville/Midea S-Comms](https://community.home-assistant.io/t/reverse-engineering-senville-midea-scomms/992233) — corresponding discussion forum.
+
+## Other buses on the same IDU — HA/HB
+
+Some Midea IDUs expose a **second** thermostat-bus terminal pair labelled **HA/HB**
+(also seen as H1/H2 or HBL on adjacent series) in addition to X/Y/E. This pair is
+used to connect Midea's premium wired thermostat, which gets a higher-bandwidth and
+more privileged channel into the IDU than XYE/CCM offers — notably, the proprietary
+thermostat can drive features such as native AUTO mode that XYE-connected controllers
+cannot.
+
+HA/HB is currently out of scope for this component. It is documented here so future
+contributors don't confuse it with XYE or assume the same interface hardware works.
+
+### ⚠️ CRITICAL: HA/HB backfeeds the XYE port at ≥19 V on KJR-120W/MBF
+
+MidATRIX confirmed in [HA Community thread post
+#239](https://community.home-assistant.io/t/midea-a-c-via-local-xye/857679/239) (May
+2026, while tapping a **KJR-120W/MBF** wired controller) that:
+
+> "Do not connect HAHB and XYE from your wired controller to the IDU at the same
+> time. When HAHB is connected and powered the XYE port pushes out 19V+. The same
+> as HAHB. Don't blow up your boards…"
+
+In other words, on this controller the **HA/HB rail backfeeds into the XYE
+terminals through the controller's internal bus circuitry**. Connecting an XYE
+TTL-level RS-485 dongle while HA/HB is still wired and energised will apply ~19 V
+to nominally 5 V signal lines and **destroy the transceiver and possibly the host
+MCU**.
+
+MidATRIX's working configuration:
+
+1. **Disconnect** HA/HB from the IDU/controller before wiring up XYE.
+2. Provide a **dedicated 12 V supply** to the XYE `+` rail and ground to `E`.
+3. With HA/HB de-energised, the wired controller communicates over XYE at the
+   expected **5 V** logic levels and **4800 8N1** (same baud as S1/S2 — confirmed
+   in the same post).
+
+Trade-off observed: connecting the wired controller to XYE caused the Senville
+app to lose access to extended-query data (current power usage, blower CFM) —
+consistent with bus arbitration handing those polls to the wired controller
+instead of the app's gateway.
+
+### Electrical layer — not standard RS-485
+
+A voltmeter reading across an idle HA/HB pair on one reporter's unit measures
+**~18.5 VDC**, consistent with MidATRIX's "19 V+" observation on the
+backfed XYE port of the same controller family. That voltage is **outside the
+standard RS-485 common-mode range** (−7 V to +12 V; some "extended" parts go to
+±25 V), so HA/HB is almost certainly not plain RS-485. Plugging this project's
+XYE RS-485 dongle into HA/HB will at best log garbage and at worst destroy the
+transceiver.
+
+Likely PHY options (need a scope capture to disambiguate):
+
+- **Single-ended load modulation** — bus rests at ~18 V; the talker sinks current to
+  pull it low for each bit. Common on long-run HVAC thermostat wiring because the
+  same pair powers the thermostat.
+- **Low-amplitude differential AC-coupled on a DC bias** — 18 V is just power; a
+  ±0.5–1 V differential signal rides on top. Requires an isolated extended-common-
+  mode transceiver (e.g. ADM2582E, ISO1500, MAX22500E) to sniff.
+- **Current loop / Modbus-over-current variant** — bus voltage dips during bit
+  transitions rather than swinging cleanly.
+
+### Relationship to S1/S2 and XYE
+
+Functionally HA/HB is **IDU ↔ thermostat**, not IDU ↔ ODU — so it is *not* the same
+bus as S1/S2 (which MidATRIX documents). But because Midea reuses internal
+high-bandwidth protocols across product lines, the **message-layer frame format**
+(`0xA0` preamble, length-prefixed payload, CRC-16/MODBUS — see [Framing
+differences](#framing-differences-not-directly-comparable)) is a reasonable starting
+guess once you have HA/HB bytes off the wire. The endpoints (thermostat address vs.
+ODU address) and message IDs will differ.
+
+If anyone captures HA/HB traffic and validates this guess, please open an issue —
+no public reverse-engineering of the Midea premium-thermostat bus exists today, and
+that gap is the most likely explanation for what the proprietary thermostat does
+that an XYE-connected controller can't.
+
+### Investigation checklist
+
+Before guessing the protocol, characterise the PHY:
+
+1. Confirm the model number and check the IDU wiring diagram (often inside the
+   front cover) — the diagram identifies each terminal pair and may name HA/HB
+   explicitly.
+2. Scope the line: any USB scope (Hantek 6022BE / Owon / Analog Discovery) AC-coupled
+   on one wire referenced to chassis GND, ~2 V/div, capture during a known thermostat
+   command (power on/off, change setpoint). The waveform identifies the PHY:
+   - Clean ±2.5 V symmetric swing on 18 V DC → AC-coupled differential.
+   - Bus dropping 18 V → ~0 V in bit-shaped pulses → single-ended pulldown.
+   - Asymmetric rise/fall → load modulation.
+3. Once the PHY is known, build the interface accordingly:
+   - Differential → isolated extended-common-mode RS-485 transceiver.
+   - Single-ended pulldown → optocoupler + comparator.
+   - Load modulation → custom analog front-end.
+4. With clean bytes on a serial port, try MidATRIX's frame validator first
+   (`0xA0` preamble, CRC-16/MODBUS). If frames pass CRC, the message-layer protocol
+   is shared with S1/S2 and reuse of their decoder framework becomes practical.
+
 ## References
 
 1. **XYE Reverse Engineering Project**
@@ -510,6 +766,20 @@ The master (CCM/thermostat) uses a polling model:
    - https://github.com/mdrobnak/esphome/tree/units_switch
    - Source of Fahrenheit switch, defrost sensor, and fan speed text sensor features
 
+7. **MidATRIX — midea-s1s2-rs485-monitor**
+   - https://github.com/MidATRIX/midea-s1s2-rs485-monitor
+   - Companion reverse-engineering of the Midea **S1/S2 bus** (IDU↔ODU) — a
+     different bus from XYE/CCM but the same protocol family. Provides field-level
+     evidence (sensor inventory, scaling formulas, defrost/EXV/compressor signals)
+     useful for narrowing down still-unknown XYE bytes. See [Related Protocols](#related-protocols--s1s2-bus-iduodu).
+
+8. **MidATRIX community posts on XYE/HA-HB/oil-return cycle (May 2026)**
+   - HA Community ["Midea A/C via local XYE" post #239](https://community.home-assistant.io/t/midea-a-c-via-local-xye/857679/239) — KJR-120W/MBF wiring breakthrough, HA/HB → XYE port 19 V backfeed warning, confirmation that XYE and S1/S2 both run 4800 8N1, observation that wired-controller-on-XYE blocks Senville-app extended queries.
+   - HA Community ["Reverse engineering Senville/Midea SComms" post #18](https://community.home-assistant.io/t/reverse-engineering-senville-midea-scomms/992233/18) — `c0_b28 = EEV Low`, `c0_b29 = EEV High` (IDU EEV step count as 16-bit LE) and `c0_b19` active during the 2-min oil-return process.
+   - Same community thread, follow-up post: alternative interpretation of byte 28 as an Oil Return Cycle counter (bits 0-6 timer/percentage, bit 7 active flag, ~30 min cycle, 90 % threshold, 2 min equalize). Conflicts with the EEV-position interpretation; both documented in [Byte 27-29 observations](#byte-27-29-observations).
+
 ## Version History
 
+- **v1.2** (2026-06-15): Incorporated MidATRIX May 2026 community posts: dual candidate interpretations for C0 bytes 28-29 (IDU EEV position 16-bit LE vs Oil Return Cycle counter), critical HA/HB→XYE 19 V backfeed safety warning on KJR-120W/MBF, retired the obsolete AC-voltage and temperature byte-28 hypotheses.
+- **v1.1** (2026-05-24): Added "Related Protocols — S1/S2 bus" section with MidATRIX cross-reference and byte-28 hypotheses
 - **v1.0** (2026-01-30): Initial documentation based on code analysis and external references
