@@ -18,15 +18,8 @@ Temperature Temperature::from_celsius(float celsius) {
 
 size_t Temperature::print_debug(const char *tag, const char *name, size_t left, int level, TemperatureEncoding encoding) const {
   if (left < sizeof(Temperature)) return left;
-  
-  float temp_celsius;
-  if (encoding == TemperatureEncoding::RAW) {
-    temp_celsius = static_cast<float>(value);
-  } else {
-    temp_celsius = to_celsius();
-  }
-  
-  ::esphome::esp_log_printf_(level, tag, __LINE__, ESPHOME_LOG_FORMAT("    %s: 0x%02X (%.2f°C)"), 
+  const float temp_celsius = (encoding == TemperatureEncoding::RAW) ? static_cast<float>(value) : to_celsius();
+  ::esphome::esp_log_printf_(level, tag, __LINE__, ESPHOME_LOG_FORMAT("    %s: 0x%02X (%.2f°C)"),
            name, value, temp_celsius);
   return left - sizeof(Temperature);
 }

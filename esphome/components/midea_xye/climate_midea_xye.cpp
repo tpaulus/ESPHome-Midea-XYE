@@ -142,7 +142,7 @@ void ClimateMideaXYE::sendRecv(uint8_t cmdSent) {
     }
     if (i == RX_MESSAGE_LENGTH) {
       // Log incoming message at debug level
-      rx_data.print_debug(i, Constants::TAG, ESPHOME_LOG_LEVEL_DEBUG);
+      rx_data.print_debug(i, Constants::TAG, ESPHOME_LOG_LEVEL_DEBUG, this->use_fahrenheit_);
       // Don't parse responses to SET or FOLLOW_ME commands to avoid
       // overwriting the mode we just set. The AC state will be updated
       // on subsequent QUERY cycles.
@@ -269,12 +269,8 @@ void ClimateMideaXYE::ParseResponse() {
         // Update current_temperature based on sensor availability
         this->update_current_temperature_from_sensors_(need_publish);
 
-#ifndef SET_TARGET_TEMP_ON_QUERY
-        // Temperature is raw Celsius; bit 6 (SET_TEMP_STATUS_FLAG / 0x40) may be set
-        // by the unit in certain states and must be masked out before use.
-        update_property(this->target_temperature,
-                        XYEAdapter::get_target_temperature(qr.target_temperature.value), need_publish);
-#endif
+        // Target temperature is read exclusively from C4 (QUERY_EXTENDED) to handle both
+        // Celsius and Fahrenheit encodings consistently. C0 target_temperature is not used.
 
         // Compressor/defrost-aware action is opt-in (compressor_aware_action) while the
         // C0 byte-19 compressor flag is still provisional. When disabled, compressor_active=true
@@ -327,26 +323,20 @@ void ClimateMideaXYE::ParseResponse() {
       const auto &exr = rx_data.message.data.extended_query_response;
       set_sensor(this->outdoor_sensor_, XYEAdapter::get_temperature(exr.outdoor_temperature.value));
       set_number(this->static_pressure_number_, static_cast<float>(STATIC_PRESSURE_VALUE_MASK & exr.static_pressure));
-#ifdef SET_TARGET_TEMP_ON_EXTENDED_QUERY
-      if (this->mode != ClimateMode::CLIMATE_MODE_OFF || ForceReadNextCycle == 1) {
-        float incoming_target_temp = 0.0;
-        if (this->use_fahrenheit_) {
-          incoming_target_temp = (float) (((exr.target_temperature.value - FAHRENHEIT_TEMP_OFFSET) - 32.0) * 5.0 / 9.0);
-          if (incoming_target_temp != this->target_temperature) {
-            need_publish = true;
-            update_property(this->target_temperature, incoming_target_temp, need_publish);
-          }
-        } else {
-          incoming_target_temp = XYEAdapter::get_temperature(exr.target_temperature.value);
-          if (incoming_target_temp != this->target_temperature) {
-            need_publish = true;
-            update_property(this->target_temperature, incoming_target_temp, need_publish);
-          }
-        }
-        if (need_publish)
-          this->publish_state();
+      // C4 is the sole source for target_temperature, covering both unit modes:
+      //  - Fahrenheit: encoded as (°F + FAHRENHEIT_TEMP_OFFSET); convert to Celsius for ESPHome.
+      //  - Celsius:    raw integer degrees with bit 6 (0x40) status flag; mask before use.
+      // Respect post_set_grace_: skip until the C0 grace window has closed so a freshly-sent
+      // SET command isn't immediately overwritten by stale device state.
+      // Fahrenheit C4 decode approach adapted from rmounce/esphome@xye-units-switch.
+      if ((this->mode != ClimateMode::CLIMATE_MODE_OFF || ForceReadNextCycle == 1) &&
+          post_set_grace_ == 0) {
+        const float incoming_target_temp =
+            XYEAdapter::get_target_temperature(exr.target_temperature.value, this->use_fahrenheit_);
+        update_property(this->target_temperature, incoming_target_temp, need_publish);
       }
-#endif
+      if (need_publish)
+        this->publish_state();
       // Sync fan mode from the C4 target_fan_speed field when enabled. This is the commanded
       // speed as set on the physical thermostat and persists when the fan is idle, unlike
       // C0 fan_mode which reads 0x00 when stopped.

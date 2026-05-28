@@ -394,8 +394,8 @@ constexpr float TEMP_ENCODING_SCALE = 2.0f;
  * @brief Temperature encoding type
  */
 enum class TemperatureEncoding : uint8_t {
-  ENCODED = 0,  ///< Standard encoding: (celsius * TEMP_ENCODING_SCALE) + TEMP_ENCODING_OFFSET
-  RAW = 1       ///< Raw Celsius value (no encoding)
+  ENCODED = 0, ///< Standard encoding: (celsius * TEMP_ENCODING_SCALE) + TEMP_ENCODING_OFFSET
+  RAW = 1,     ///< Raw integer value (no decoding — display as-is)
 };
 
 /**

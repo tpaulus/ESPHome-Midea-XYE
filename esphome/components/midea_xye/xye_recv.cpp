@@ -1,6 +1,7 @@
 #ifdef USE_ARDUINO
 
 #include "xye_recv.h"
+#include "xye_adapter.h"
 #include "xye_log.h"
 
 namespace esphome {
@@ -38,7 +39,22 @@ size_t QueryResponseData::print_debug(const char *tag, size_t left, int level) c
 }
 
 // ExtendedQueryResponseData methods
-size_t ExtendedQueryResponseData::print_debug(const char *tag, size_t left, int level) const {
+static size_t print_setpoint_debug(const char *tag, const char *name, uint8_t raw,
+                                   size_t left, int level, bool use_fahrenheit) {
+  if (left < sizeof(Temperature)) return left;
+  const float celsius = XYEAdapter::get_target_temperature(raw, use_fahrenheit);
+  if (use_fahrenheit) {
+    const int fahrenheit = static_cast<int>(raw) - static_cast<int>(FAHRENHEIT_TEMP_OFFSET);
+    ::esphome::esp_log_printf_(level, tag, __LINE__, ESPHOME_LOG_FORMAT("    %s: 0x%02X (%d\xc2\xb0F / %.2f\xc2\xb0C)"),
+             name, raw, fahrenheit, celsius);
+  } else {
+    ::esphome::esp_log_printf_(level, tag, __LINE__, ESPHOME_LOG_FORMAT("    %s: 0x%02X (%.2f\xc2\xb0C)"),
+             name, raw, celsius);
+  }
+  return left - sizeof(Temperature);
+}
+
+size_t ExtendedQueryResponseData::print_debug(const char *tag, size_t left, int level, bool use_fahrenheit) const {
   ::esphome::esp_log_printf_(level, tag, __LINE__, ESPHOME_LOG_FORMAT("  ExtendedQueryResponseData:"));
   
   left = print_debug_uint8(tag, "indoor_fan_pwm", indoor_fan_pwm, left, level);
@@ -53,7 +69,7 @@ size_t ExtendedQueryResponseData::print_debug(const char *tag, size_t left, int 
   left = print_debug_uint8(tag, "reserved1", reserved1, left, level);
   left = print_debug_enum(tag, "system_status_flags", system_status_flags, left, level);
   left = print_debug_enum(tag, "target_fan_speed", target_fan_speed, left, level);
-  left = target_temperature.print_debug(tag, "target_temperature", left, level);
+  left = print_setpoint_debug(tag, "target_temperature", target_temperature.value, left, level, use_fahrenheit);
   left = compressor_freq_or_fan_rpm.print_debug(tag, "compressor_freq/outdoor_fan_rpm", left, level);
   left = outdoor_temperature.print_debug(tag, "outdoor_temperature", left, level);
   left = print_debug_uint8(tag, "reserved2", reserved2, left, level);
@@ -73,7 +89,7 @@ Command ReceiveData::get_command() const {
   return message.frame.header.command;
 }
 
-size_t ReceiveData::print_debug(size_t left, const char *tag, int level) const {
+size_t ReceiveData::print_debug(size_t left, const char *tag, int level, bool use_fahrenheit) const {
   ::esphome::esp_log_printf_(level, tag, __LINE__, ESPHOME_LOG_FORMAT("RX Message:"));
   ::esphome::esp_log_printf_(level, tag, __LINE__, ESPHOME_LOG_FORMAT("  Frame Header:"));
   
@@ -91,7 +107,7 @@ size_t ReceiveData::print_debug(size_t left, const char *tag, int level) const {
       break;
     
     case Command::QUERY_EXTENDED:
-      left = message.data.extended_query_response.print_debug(tag, left, level);
+      left = message.data.extended_query_response.print_debug(tag, left, level, use_fahrenheit);
       break;
     
     case Command::SET:
