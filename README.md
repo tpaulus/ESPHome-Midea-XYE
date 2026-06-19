@@ -101,6 +101,9 @@ climate:
     period: 1s                  # Optional. Defaults to 1s
     timeout: 100ms              # Optional. Defaults to 100ms
     use_fahrenheit: false       # Optional. Defaults to false
+    flow_control_pin: D2        # Optional. Shared MAX485 RE/DE pin.
+                                # When set, the component drives it high while
+                                # transmitting and low while waiting for replies.
 ```
 
 ### Follow-Me Example
@@ -135,6 +138,9 @@ climate:
     period: 1s                  # Optional. Defaults to 1s
     timeout: 100ms              # Optional. Defaults to 100ms
     use_fahrenheit: false       # Optional. Defaults to false
+    flow_control_pin: D2        # Optional. Shared MAX485 RE/DE pin.
+                                # When set, the component drives it high while
+                                # transmitting and low while waiting for replies.
     #beeper: true               # Optional. Beep on commands
     visual:                     # Optional. Example of visual settings override
       min_temperature: 17 °C    # min: 17
