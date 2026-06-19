@@ -1,7 +1,8 @@
 from esphome.core import coroutine
-from esphome import automation
+from esphome import automation, pins
 from esphome.components import binary_sensor, climate, sensor, uart, remote_transmitter, number
 from esphome.components.remote_base import CONF_TRANSMITTER_ID
+from esphome.cpp_helpers import gpio_pin_expression
 import esphome.config_validation as cv
 import esphome.codegen as cg
 from esphome.const import (
@@ -10,6 +11,7 @@ from esphome.const import (
     CONF_CUSTOM_FAN_MODES,
     CONF_CUSTOM_PRESETS,
     CONF_ID,
+    CONF_FLOW_CONTROL_PIN,
     CONF_PERIOD,
     CONF_SUPPORTED_MODES,
     CONF_SUPPORTED_PRESETS,
@@ -150,6 +152,7 @@ CONFIG_SCHEMA = cv.All(
             # physical thermostat), so Home Assistant reflects fan mode changes even when
             # not triggered by an HA command.
             cv.Optional(CONF_SYNC_FAN_MODE_FROM_DEVICE, default=False): cv.boolean,
+            cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
             cv.OnlyWith(CONF_TRANSMITTER_ID, "remote_transmitter"): cv.use_id(
                 remote_transmitter.RemoteTransmitterComponent
             ),
@@ -395,6 +398,9 @@ async def to_code(config):
     cg.add(var.set_use_fahrenheit(config[CONF_USE_FAHRENHEIT]))
     cg.add(var.set_compressor_aware_action(config[CONF_COMPRESSOR_AWARE_ACTION]))
     cg.add(var.set_sync_fan_mode_from_device(config[CONF_SYNC_FAN_MODE_FROM_DEVICE]))
+    if CONF_FLOW_CONTROL_PIN in config:
+        pin = await gpio_pin_expression(config[CONF_FLOW_CONTROL_PIN])
+        cg.add(var.set_flow_control_pin(pin))
     if CONF_TRANSMITTER_ID in config:
         cg.add_define("USE_REMOTE_TRANSMITTER")
         transmitter_ = await cg.get_variable(config[CONF_TRANSMITTER_ID])
