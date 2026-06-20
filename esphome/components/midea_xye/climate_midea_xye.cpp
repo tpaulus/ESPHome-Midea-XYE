@@ -63,6 +63,7 @@ void ClimateMideaXYE::control(const ClimateCall &call) {
 
 void ClimateMideaXYE::setup() {
   // this->uart_->check_uart_settings(4800, 1, UART_CONFIG_PARITY_NONE, 8);
+  this->set_default_supported_modes_();
   this->last_on_mode_ = *this->supported_modes_.begin();
   controlState = ControlState::SEND_QUERY;
   queuedCommand = ControlState::WAIT_DATA;
@@ -276,7 +277,9 @@ void ClimateMideaXYE::ParseResponse() {
         this->update_current_temperature_from_sensors_(need_publish);
 
         // Target temperature is read exclusively from C4 (QUERY_EXTENDED) to handle both
-        // Celsius and Fahrenheit encodings consistently. C0 target_temperature is not used.
+        // Celsius and Fahrenheit encodings consistently. Keep C0 as a bounded fallback for
+        // units whose C4 target byte uses a different status/encoding variant.
+        this->c0_target_temperature_ = XYEAdapter::get_target_temperature(qr.target_temperature.value, false);
 
         // Compressor/defrost-aware action is opt-in (compressor_aware_action) while the
         // C0 byte-19 compressor flag is still provisional. When disabled, compressor_active=true
@@ -337,8 +340,15 @@ void ClimateMideaXYE::ParseResponse() {
       // Fahrenheit C4 decode approach adapted from rmounce/esphome@xye-units-switch.
       if ((this->mode != ClimateMode::CLIMATE_MODE_OFF || ForceReadNextCycle == 1) &&
           post_set_grace_ == 0) {
-        const float incoming_target_temp =
+        float incoming_target_temp =
             XYEAdapter::get_target_temperature(exr.target_temperature.value, this->use_fahrenheit_);
+        if (incoming_target_temp < MIN_TARGET_TEMPERATURE_C ||
+            incoming_target_temp > MAX_TARGET_TEMPERATURE_C) {
+          ESP_LOGW(Constants::TAG,
+                   "Ignoring out-of-range C4 target setpoint %.2f°C from raw 0x%02X; using C0 fallback %.2f°C",
+                   incoming_target_temp, exr.target_temperature.value, this->c0_target_temperature_);
+          incoming_target_temp = this->c0_target_temperature_;
+        }
         update_property(this->target_temperature, incoming_target_temp, need_publish);
       }
       if (need_publish)
@@ -434,11 +444,12 @@ uint32_t ClimateMideaXYE::CalculateGetTime(uint8_t time) {
 }
 
 climate::ClimateTraits ClimateMideaXYE::traits() {
+  this->set_default_supported_modes_();
   auto traits = climate::ClimateTraits();
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
-  traits.set_visual_min_temperature(17);
-  traits.set_visual_max_temperature(30);
+  traits.set_visual_min_temperature(MIN_TARGET_TEMPERATURE_C);
+  traits.set_visual_max_temperature(MAX_TARGET_TEMPERATURE_C);
   traits.set_visual_temperature_step(1.0);
   traits.set_visual_current_temperature_step(VISUAL_CURRENT_TEMPERATURE_STEP);
   traits.set_supported_modes(this->supported_modes_);
@@ -459,6 +470,17 @@ climate::ClimateTraits ClimateMideaXYE::traits() {
     traits.add_supported_preset(ClimatePreset::CLIMATE_PRESET_NONE);
 
   return traits;
+}
+
+void ClimateMideaXYE::set_default_supported_modes_() {
+  if (!this->supported_modes_.empty())
+    return;
+  this->supported_modes_.insert({
+      ClimateMode::CLIMATE_MODE_COOL,
+      ClimateMode::CLIMATE_MODE_HEAT,
+      ClimateMode::CLIMATE_MODE_FAN_ONLY,
+      ClimateMode::CLIMATE_MODE_DRY,
+  });
 }
 
 void ClimateMideaXYE::dump_config() {

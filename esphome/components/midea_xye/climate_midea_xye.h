@@ -90,6 +90,10 @@ constexpr uint8_t CAPABILITIES_SWING = static_cast<uint8_t>(xye::Capabilities::S
 /// Precision step for `current_temperature` reported to Home Assistant (0.01 °C → 2 decimal places).
 /// Applies to both the XYE-bus internal temperature and any external follow_me sensor value.
 constexpr float VISUAL_CURRENT_TEMPERATURE_STEP = 0.01f;
+/// Lowest setpoint accepted by the Midea XYE protocol and exposed to Home Assistant.
+constexpr float MIN_TARGET_TEMPERATURE_C = 17.0f;
+/// Highest setpoint accepted by the Midea XYE protocol and exposed to Home Assistant.
+constexpr float MAX_TARGET_TEMPERATURE_C = 30.0f;
 
 constexpr uint8_t OP_FLAG_WATER_PUMP = static_cast<uint8_t>(xye::OperationFlags::WATER_PUMP);
 constexpr uint8_t OP_FLAG_WATER_LOCK = static_cast<uint8_t>(xye::OperationFlags::WATER_LOCK);
@@ -243,12 +247,14 @@ class ClimateMideaXYE : public PollingComponent, public climate::Climate, public
   StaticPressureNumber *static_pressure_number_{nullptr};
   ClimateMode last_on_mode_;
   float internal_temperature_{NAN};
+  float c0_target_temperature_{NAN};
 
   void ParseResponse();
   uint8_t CalculateSetTime(uint32_t time);
   uint32_t CalculateGetTime(uint8_t time);
   void update_current_temperature_from_sensors_(bool &need_publish);
   void on_follow_me_sensor_update_(float state);
+  void set_default_supported_modes_();
 };
 
 }  // namespace xye
