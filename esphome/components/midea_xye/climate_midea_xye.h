@@ -94,6 +94,12 @@ constexpr float VISUAL_CURRENT_TEMPERATURE_STEP = 0.01f;
 constexpr float MIN_TARGET_TEMPERATURE_C = 17.0f;
 /// Highest setpoint accepted by the Midea XYE protocol and exposed to Home Assistant.
 constexpr float MAX_TARGET_TEMPERATURE_C = 30.0f;
+/// Freezing point offset used when converting Fahrenheit follow-me sensor readings to Celsius.
+constexpr float FAHRENHEIT_FREEZING_POINT = 32.0f;
+/// Numerator for Fahrenheit-to-Celsius conversion.
+constexpr float FAHRENHEIT_TO_CELSIUS_NUMERATOR = 5.0f;
+/// Denominator for Fahrenheit-to-Celsius conversion.
+constexpr float FAHRENHEIT_TO_CELSIUS_DENOMINATOR = 9.0f;
 
 constexpr uint8_t OP_FLAG_WATER_PUMP = static_cast<uint8_t>(xye::OperationFlags::WATER_PUMP);
 constexpr uint8_t OP_FLAG_WATER_LOCK = static_cast<uint8_t>(xye::OperationFlags::WATER_LOCK);
@@ -255,6 +261,7 @@ class ClimateMideaXYE : public PollingComponent, public climate::Climate, public
   void update_current_temperature_from_sensors_(bool &need_publish);
   void on_follow_me_sensor_update_(float state);
   void set_default_supported_modes_();
+  float normalize_follow_me_temperature_(float temperature) const;
 };
 
 }  // namespace xye

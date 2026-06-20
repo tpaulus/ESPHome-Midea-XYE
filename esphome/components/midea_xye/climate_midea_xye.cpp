@@ -266,16 +266,16 @@ void ClimateMideaXYE::ParseResponse() {
         }
       }
 
+      // Store the internal temperature from the XYE bus even when the unit is off.
+      this->internal_temperature_ = XYEAdapter::get_temperature(qr.t1_temperature.value);
+
+      // Publish the internal temperature to the sensor if configured
+      set_sensor(this->internal_current_temperature_sensor_, this->internal_temperature_);
+
+      // Update current_temperature based on sensor availability
+      this->update_current_temperature_from_sensors_(need_publish);
+
       if (mode != ClimateMode::CLIMATE_MODE_OFF || ForceReadNextCycle == 1) {
-        // Store the internal temperature from the XYE bus
-        this->internal_temperature_ = XYEAdapter::get_temperature(qr.t1_temperature.value);
-
-        // Publish the internal temperature to the sensor if configured
-        set_sensor(this->internal_current_temperature_sensor_, this->internal_temperature_);
-
-        // Update current_temperature based on sensor availability
-        this->update_current_temperature_from_sensors_(need_publish);
-
         // Target temperature is read exclusively from C4 (QUERY_EXTENDED) to handle both
         // Celsius and Fahrenheit encodings consistently. Keep C0 as a bounded fallback for
         // units whose C4 target byte uses a different status/encoding variant.
@@ -578,6 +578,7 @@ void ClimateMideaXYE::on_follow_me_sensor_update_(float state) {
   if (std::isnan(state)) {
     return;
   }
+  const float temperature = this->normalize_follow_me_temperature_(state);
   
   // Update current_temperature with the sensor value
   bool need_publish = false;
@@ -587,17 +588,25 @@ void ClimateMideaXYE::on_follow_me_sensor_update_(float state) {
   }
 
   // Send follow_me command with the sensor temperature
-  this->do_follow_me(state, false);
+  this->do_follow_me(temperature, false);
 }
 
 void ClimateMideaXYE::update_current_temperature_from_sensors_(bool &need_publish) {
   // Use follow_me_sensor as current_temperature if available, otherwise use internal temperature
   if (this->follow_me_sensor_ != nullptr && this->follow_me_sensor_->has_state() &&
       !std::isnan(this->follow_me_sensor_->state)) {
-    update_property(this->current_temperature, this->follow_me_sensor_->state, need_publish);
+    update_property(this->current_temperature, this->normalize_follow_me_temperature_(this->follow_me_sensor_->state),
+                    need_publish);
   } else if (!std::isnan(this->internal_temperature_)) {
     update_property(this->current_temperature, this->internal_temperature_, need_publish);
   }
+}
+
+float ClimateMideaXYE::normalize_follow_me_temperature_(float temperature) const {
+  if (!this->use_fahrenheit_)
+    return temperature;
+  return (temperature - FAHRENHEIT_FREEZING_POINT) * FAHRENHEIT_TO_CELSIUS_NUMERATOR /
+         FAHRENHEIT_TO_CELSIUS_DENOMINATOR;
 }
 
 }  // namespace xye
