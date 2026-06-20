@@ -32,6 +32,7 @@ uart:
   tx_pin: TX
   rx_pin: RX
   baud_rate: 4800
+  flow_control_pin: GPIO4
 
 # Main settings
 climate:
@@ -41,7 +42,6 @@ climate:
     period: 1s
     timeout: 100ms
     use_fahrenheit: false
-    flow_control_pin: GPIO4
     follow_me_sensor: test_sensor  # Automatically updates follow_me from this sensor
     internal_current_temperature:
       name: "Internal Current Temperature"

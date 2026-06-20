@@ -39,6 +39,9 @@ uart:
   tx_pin: TX
   rx_pin: RX
   baud_rate: 4800
+  # Optional, ESP32 only: native RS-485 direction control for MAX485-style
+  # transceivers with DE and /RE tied together.
+  # flow_control_pin: GPIO4
   debug: #If you want to help reverse engineer
     direction: BOTH
 
@@ -50,9 +53,6 @@ climate:
     period: 1s                  # Optional. Defaults to 1s
     timeout: 100ms              # Optional. Defaults to 100ms
     use_fahrenheit: false       # Optional. Defaults to false.
-    flow_control_pin: D2        # Optional. Shared MAX485 RE/DE pin.
-                                # When set, the component drives it high while
-                                # transmitting and low while waiting for replies.
     #beeper: true               # Optional. Beep on commands.
     visual:                     # Optional. Example of visual settings override.
       min_temperature: 17 °C    # min: 17

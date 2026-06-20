@@ -91,11 +91,6 @@ constexpr uint8_t CAPABILITIES_SWING = static_cast<uint8_t>(xye::Capabilities::S
 /// Applies to both the XYE-bus internal temperature and any external follow_me sensor value.
 constexpr float VISUAL_CURRENT_TEMPERATURE_STEP = 0.01f;
 
-/// Logical GPIO level that enables transmit mode on a MAX485-style shared RE/DE pin.
-constexpr bool RS485_FLOW_CONTROL_TRANSMIT = true;
-/// Logical GPIO level that enables receive mode on a MAX485-style shared RE/DE pin.
-constexpr bool RS485_FLOW_CONTROL_RECEIVE = false;
-
 constexpr uint8_t OP_FLAG_WATER_PUMP = static_cast<uint8_t>(xye::OperationFlags::WATER_PUMP);
 constexpr uint8_t OP_FLAG_WATER_LOCK = static_cast<uint8_t>(xye::OperationFlags::WATER_LOCK);
 
@@ -128,7 +123,6 @@ class ClimateMideaXYE : public PollingComponent, public climate::Climate, public
   void set_uart_parent(uart::UARTComponent *parent) { this->uart_ = parent; }
   void set_period(uint32_t ms) { this->set_update_interval(ms); }
   void set_response_timeout(uint32_t ms) { this->response_timeout = ms; }
-  void set_flow_control_pin(GPIOPin *flow_control_pin) { this->flow_control_pin_ = flow_control_pin; }
 
   /* Component methods */
 
@@ -211,7 +205,6 @@ class ClimateMideaXYE : public PollingComponent, public climate::Climate, public
 
  protected:
   uart::UARTComponent *uart_;
-  GPIOPin *flow_control_pin_{nullptr};
 #ifdef USE_REMOTE_TRANSMITTER
   IrTransmitter transmitter_;
 #endif

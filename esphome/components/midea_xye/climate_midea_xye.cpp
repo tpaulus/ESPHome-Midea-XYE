@@ -63,11 +63,6 @@ void ClimateMideaXYE::control(const ClimateCall &call) {
 
 void ClimateMideaXYE::setup() {
   // this->uart_->check_uart_settings(4800, 1, UART_CONFIG_PARITY_NONE, 8);
-  if (this->flow_control_pin_ != nullptr) {
-    this->flow_control_pin_->setup();
-    this->flow_control_pin_->digital_write(RS485_FLOW_CONTROL_RECEIVE);
-  }
-
   this->last_on_mode_ = *this->supported_modes_.begin();
   controlState = ControlState::SEND_QUERY;
   queuedCommand = ControlState::WAIT_DATA;
@@ -130,14 +125,8 @@ void ClimateMideaXYE::setTransmitParams() {
 void ClimateMideaXYE::sendRecv(uint8_t cmdSent) {
   // Log outgoing message at debug level
   tx_data.print_debug(Constants::TAG, TX_MESSAGE_LENGTH, ESPHOME_LOG_LEVEL_DEBUG);
-  if (this->flow_control_pin_ != nullptr) {
-    this->flow_control_pin_->digital_write(RS485_FLOW_CONTROL_TRANSMIT);
-  }
   this->uart_->write_array(tx_data.raw, TX_MESSAGE_LENGTH);
   this->uart_->flush();
-  if (this->flow_control_pin_ != nullptr) {
-    this->flow_control_pin_->digital_write(RS485_FLOW_CONTROL_RECEIVE);
-  }
   controlState = ControlState::WAIT_DATA;
   // Delay for response_timeout ms to allow response from the AC unit.
   this->set_timeout("read-result", this->response_timeout, [this, cmdSent]() {
@@ -477,7 +466,6 @@ void ClimateMideaXYE::dump_config() {
   ESP_LOGCONFIG(Constants::TAG, "  [x] Period: %dms", this->get_update_interval());
   ESP_LOGCONFIG(Constants::TAG, "  [x] Response timeout: %dms", this->response_timeout);
   ESP_LOGCONFIG(Constants::TAG, "  [x] Use Fahrenheit: %d", this->use_fahrenheit_);
-  log_pin(Constants::TAG, "  Flow Control Pin: ", this->flow_control_pin_);
 
 #ifdef USE_REMOTE_TRANSMITTER
   ESP_LOGCONFIG(Constants::TAG, "  [x] Using RemoteTransmitter");
