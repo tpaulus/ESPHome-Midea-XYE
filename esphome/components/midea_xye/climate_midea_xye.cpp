@@ -1,5 +1,7 @@
 #ifdef USE_ARDUINO
 
+#include <inttypes.h>
+
 #include "climate_midea_xye.h"
 
 #include "esphome/core/log.h"
@@ -591,8 +593,8 @@ climate::ClimateTraits ClimateMideaXYE::traits() {
 
 void ClimateMideaXYE::dump_config() {
   ESP_LOGCONFIG(Constants::TAG, "MideaXYE:");
-  ESP_LOGCONFIG(Constants::TAG, "  [x] Period: %dms", this->get_update_interval());
-  ESP_LOGCONFIG(Constants::TAG, "  [x] Response timeout: %dms", this->response_timeout);
+  ESP_LOGCONFIG(Constants::TAG, "  [x] Period: %" PRIu32 "ms", this->get_update_interval());
+  ESP_LOGCONFIG(Constants::TAG, "  [x] Response timeout: %" PRIu32 "ms", this->response_timeout);
   ESP_LOGCONFIG(Constants::TAG, "  [x] Use Fahrenheit: %d", this->use_fahrenheit_);
 
 #ifdef USE_REMOTE_TRANSMITTER
