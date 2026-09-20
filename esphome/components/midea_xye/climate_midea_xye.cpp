@@ -300,6 +300,17 @@ void ClimateMideaXYE::update() {
       // If the AC mode changed, follow-me should be
       // refreshed, if emulating the wired controller's
       // behavior.
+      if (this->mode != ClimateMode::CLIMATE_MODE_OFF) {
+        if (!this->hasFollowMeTemperature_) {
+          // A SET always schedules this state, even when Follow-Me is not configured.
+          // Do not send an uninitialized C6 frame in that case.
+          controlState = ControlState::SEND_QUERY;
+          break;
+        }
+        // setTransmitParams() replaces tx_data with the preceding C3 frame. Rebuild
+        // C6 here so a mode change sends the cached remote temperature, not C3 data.
+        this->prepare_follow_me_command_(this->lastFollowMeTemperature_);
+      }
       cmdSent = CLIENT_COMMAND_FOLLOWME;
       sendRecv(cmdSent);
       if (this->mode == ClimateMode::CLIMATE_MODE_OFF) {
@@ -597,6 +608,22 @@ void ClimateMideaXYE::do_follow_me(float temperature, bool beeper) {
   IrFollowMeData data(static_cast<uint8_t>(lroundf(temperature)), beeper);
   this->transmitter_.transmit(data);
 #else
+  this->prepare_follow_me_command_(temperature);
+  // Only send if mode is something other than off.
+  // Wired controller does not send Follow-Me command when off.
+  if (this->mode != ClimateMode::CLIMATE_MODE_OFF) {
+    if (controlState != ControlState::WAIT_DATA) {
+      controlState = ControlState::SEND_FOLLOWME;
+    } else {
+      queuedCommand = ControlState::SEND_FOLLOWME;
+    }
+    ESP_LOGI(Constants::TAG, "Queued Follow-Me data.");
+  }
+#endif
+}
+
+void ClimateMideaXYE::prepare_follow_me_command_(float temperature) {
+#ifndef USE_REMOTE_TRANSMITTER
   // Prepare Follow-Me command for temperature update
   tx_data = TransmitData(Command::FOLLOW_ME, this->address_);
   auto &d = tx_data.message.data.standard;
@@ -609,19 +636,10 @@ void ClimateMideaXYE::do_follow_me(float temperature, bool beeper) {
   d.timer_stop = followMeInit ? FOLLOWME_SUBCOMMAND_UPDATE : FOLLOWME_SUBCOMMAND_INIT;
   if (!followMeInit)
     followMeInit = true;
-  lastFollowMeTemperature = static_cast<uint8_t>(lroundf(temperature));
-  d.mode_flags = static_cast<ModeFlags>(lastFollowMeTemperature);
+  lastFollowMeTemperature_ = temperature;
+  hasFollowMeTemperature_ = true;
+  d.mode_flags = static_cast<ModeFlags>(static_cast<uint8_t>(lroundf(temperature)));
   tx_data.update_crc();
-  // Only send if mode is something other than off.
-  // Wired controller does not send Follow-Me command when off.
-  if (this->mode != ClimateMode::CLIMATE_MODE_OFF) {
-    if (controlState != ControlState::WAIT_DATA) {
-      controlState = ControlState::SEND_FOLLOWME;
-    } else {
-      queuedCommand = ControlState::SEND_FOLLOWME;
-    }
-    ESP_LOGI(Constants::TAG, "Queued Follow-Me data.");
-  }
 #endif
 }
 
@@ -636,7 +654,10 @@ void ClimateMideaXYE::set_static_pressure(uint8_t static_pressure) {
   auto &d = tx_data.message.data.standard;
   d.target_temperature.value = static_cast<uint8_t>(STATIC_PRESSURE_FLAG | (static_pressure & STATIC_PRESSURE_VALUE_MASK));
   d.timer_stop = FOLLOWME_SUBCOMMAND_STOP;
-  d.mode_flags = static_cast<ModeFlags>(lastFollowMeTemperature);
+  const uint8_t follow_me_temperature =
+      hasFollowMeTemperature_ ? static_cast<uint8_t>(lroundf(lastFollowMeTemperature_))
+                              : DEFAULT_FOLLOW_ME_TEMPERATURE;
+  d.mode_flags = static_cast<ModeFlags>(follow_me_temperature);
   tx_data.update_crc();
 
   if (this->mode == ClimateMode::CLIMATE_MODE_OFF) {

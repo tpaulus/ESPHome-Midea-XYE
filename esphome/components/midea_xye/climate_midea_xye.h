@@ -95,6 +95,8 @@ constexpr float VISUAL_CURRENT_TEMPERATURE_STEP = 0.01f;
 constexpr float FAHRENHEIT_CELSIUS_OFFSET = 32.0f;
 /// Fahrenheit-to-Celsius scale used when converting a Follow-Me sensor value for ESPHome.
 constexpr float FAHRENHEIT_TO_CELSIUS_SCALE = 5.0f / 9.0f;
+/// Placeholder Follow-Me temperature for static-pressure frames before any temperature update.
+constexpr uint8_t DEFAULT_FOLLOW_ME_TEMPERATURE = 0;
 
 constexpr uint8_t OP_FLAG_WATER_PUMP = static_cast<uint8_t>(xye::OperationFlags::WATER_PUMP);
 constexpr uint8_t OP_FLAG_WATER_LOCK = static_cast<uint8_t>(xye::OperationFlags::WATER_LOCK);
@@ -237,7 +239,10 @@ class ClimateMideaXYE : public PollingComponent, public climate::Climate, public
   // When false, the next Follow-Me update sends an INIT subcommand (0x06).
   // When true, Follow-Me updates send a regular UPDATE subcommand (0x02).
   bool followMeInit;
-  uint8_t lastFollowMeTemperature;
+  /// Last Celsius temperature supplied for a Follow-Me command.
+  float lastFollowMeTemperature_{NAN};
+  /// True after a Follow-Me temperature has been supplied by a sensor or action.
+  bool hasFollowMeTemperature_{false};
   // Number of upcoming QUERY responses whose reported mode should be
   // ignored after we issue a SET. Prevents a transient mode flap
   // (e.g. cool -> off -> cool) while the unit acknowledges the new mode.
@@ -294,6 +299,7 @@ class ClimateMideaXYE : public PollingComponent, public climate::Climate, public
   uint32_t CalculateGetTime(uint8_t time);
   void update_current_temperature_from_sensors_(bool &need_publish);
   void on_follow_me_sensor_update_(float state);
+  void prepare_follow_me_command_(float temperature);
 };
 
 }  // namespace xye
