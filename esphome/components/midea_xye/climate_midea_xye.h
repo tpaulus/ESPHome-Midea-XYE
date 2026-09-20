@@ -97,6 +97,8 @@ constexpr float FAHRENHEIT_CELSIUS_OFFSET = 32.0f;
 constexpr float FAHRENHEIT_TO_CELSIUS_SCALE = 5.0f / 9.0f;
 /// Placeholder Follow-Me temperature for static-pressure frames before any temperature update.
 constexpr uint8_t DEFAULT_FOLLOW_ME_TEMPERATURE = 0;
+/// Number of C6 INIT frames the wired controller sends when enabling Follow-Me.
+constexpr uint8_t FOLLOW_ME_INIT_TRANSMISSIONS = 3;
 
 constexpr uint8_t OP_FLAG_WATER_PUMP = static_cast<uint8_t>(xye::OperationFlags::WATER_PUMP);
 constexpr uint8_t OP_FLAG_WATER_LOCK = static_cast<uint8_t>(xye::OperationFlags::WATER_LOCK);
@@ -235,10 +237,8 @@ class ClimateMideaXYE : public PollingComponent, public climate::Climate, public
   uint16_t miss_count_{0};          // consecutive unanswered polls (normal mode)
   bool discovering_{false};         // true while a sweep is in progress
   uint8_t scan_addr_{0x00};         // address currently being probed
-  // Tracks whether Follow-Me has been initialized after mode change.
-  // When false, the next Follow-Me update sends an INIT subcommand (0x06).
-  // When true, Follow-Me updates send a regular UPDATE subcommand (0x02).
-  bool followMeInit;
+  /// Number of Follow-Me INIT frames still required before sending UPDATE frames.
+  uint8_t follow_me_init_remaining_{FOLLOW_ME_INIT_TRANSMISSIONS};
   /// Last Celsius temperature supplied for a Follow-Me command.
   float lastFollowMeTemperature_{NAN};
   /// True after a Follow-Me temperature has been supplied by a sensor or action.

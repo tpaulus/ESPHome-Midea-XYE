@@ -42,9 +42,9 @@ template<typename T> void update_property(T &property, const T &value, bool &fla
 void ClimateMideaXYE::control(const ClimateCall &call) {
   if (call.get_mode().has_value()) {
     this->mode = call.get_mode().value();
-    // Reset Follow-Me initialization flag when mode changes to ensure
-    // proper initialization sequence is sent on next Follow-Me update
-    followMeInit = false;
+    // The wired controller sends three INIT frames after a mode change before
+    // it resumes normal Follow-Me updates.
+    follow_me_init_remaining_ = FOLLOW_ME_INIT_TRANSMISSIONS;
   }
   if (call.get_target_temperature().has_value())
     this->target_temperature = call.get_target_temperature().value();
@@ -69,7 +69,7 @@ void ClimateMideaXYE::setup() {
   controlState = ControlState::SEND_QUERY;
   queuedCommand = ControlState::WAIT_DATA;
   ForceReadNextCycle = 1;
-  followMeInit = false;
+  follow_me_init_remaining_ = FOLLOW_ME_INIT_TRANSMISSIONS;
 
   // Register custom modes on the Climate base class. ESPHome 2026.4.0
   // deprecated the equivalent ClimateTraits setters in favor of these.
@@ -173,7 +173,10 @@ void ClimateMideaXYE::sendRecv(uint8_t cmdSent) {
             controlState = ControlState::SEND_QUERY;
             break;
           case CLIENT_COMMAND_FOLLOWME:
-            controlState = ControlState::SEND_QUERY;
+            controlState = this->mode != ClimateMode::CLIMATE_MODE_OFF &&
+                                   this->follow_me_init_remaining_ > 0
+                               ? ControlState::SEND_FOLLOWME
+                               : ControlState::SEND_QUERY;
             break;
         }
       }
@@ -302,6 +305,8 @@ void ClimateMideaXYE::update() {
       // If the AC mode changed, follow-me should be
       // refreshed, if emulating the wired controller's
       // behavior.
+      const bool sending_init =
+          this->mode != ClimateMode::CLIMATE_MODE_OFF && this->follow_me_init_remaining_ > 0;
       if (this->mode != ClimateMode::CLIMATE_MODE_OFF) {
         if (!this->hasFollowMeTemperature_) {
           // A SET always schedules this state, even when Follow-Me is not configured.
@@ -315,6 +320,8 @@ void ClimateMideaXYE::update() {
       }
       cmdSent = CLIENT_COMMAND_FOLLOWME;
       sendRecv(cmdSent);
+      if (sending_init)
+        this->follow_me_init_remaining_--;
       if (this->mode == ClimateMode::CLIMATE_MODE_OFF) {
         ESP_LOGI(Constants::TAG, "Set static pressure.");
       } else {
@@ -632,12 +639,7 @@ void ClimateMideaXYE::prepare_follow_me_command_(float temperature) {
 
   // timer_stop is a subcommand type field for Follow-Me commands.
   // Subcommand values: 0x06=Init, 0x02=Update, 0x04=Static pressure
-  // The followMeInit flag tracks whether we've sent the initialization command.
-  // It gets reset to false whenever the AC mode changes (see control() function),
-  // ensuring a proper initialization sequence after mode changes.
-  d.timer_stop = followMeInit ? FOLLOWME_SUBCOMMAND_UPDATE : FOLLOWME_SUBCOMMAND_INIT;
-  if (!followMeInit)
-    followMeInit = true;
+  d.timer_stop = follow_me_init_remaining_ > 0 ? FOLLOWME_SUBCOMMAND_INIT : FOLLOWME_SUBCOMMAND_UPDATE;
   lastFollowMeTemperature_ = temperature;
   hasFollowMeTemperature_ = true;
   d.mode_flags = static_cast<ModeFlags>(static_cast<uint8_t>(lroundf(temperature)));
